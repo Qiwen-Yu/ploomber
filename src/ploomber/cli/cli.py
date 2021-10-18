@@ -100,6 +100,8 @@ def examples(name, force, branch, output):
                                  force=force,
                                  branch=branch,
                                  output=output)
+    except click.ClickException as e:
+        raise
     except Exception as e:
         raise RuntimeError(
             'An error happened when executing the examples command. Check out '

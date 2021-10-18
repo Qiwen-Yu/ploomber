@@ -26,6 +26,29 @@ _lexer = MarkdownLexer()
 _formatter = TerminalFormatter(bg="dark")
 
 
+def _find_header(md):
+    """Find header markers
+    """
+    mark = '<!-- end header -->'
+    lines = md.splitlines()
+
+    for n, line in enumerate(lines):
+        if mark == line:
+            return n
+
+    return None
+
+
+def _skip_header(md):
+    line = _find_header(md)
+
+    if line:
+        lines = md.splitlines()
+        return '\n'.join(lines[line + 1:])
+    else:
+        return md
+
+
 def _delete_git_repo(path):
     """
     If on windows, we need to change permissionsto delete the repo
@@ -39,18 +62,19 @@ def _delete_git_repo(path):
                 os.chmod(Path(root, file_), stat.S_IRWXU)
 
 
-def _display_markdown(source):
-    if isinstance(source, Path):
-        source = source.read_text()
+def _display_markdown(tw, path):
+    source = path.read_text()
+
+    source = _skip_header(source)
 
     lines = source.splitlines()
 
     top_lines = '\n'.join(lines[:25])
 
-    if len(lines) > 25:
-        top_lines += '\n\n[...continues]'
+    tw.write(highlight(top_lines, _lexer, _formatter))
 
-    click.echo(highlight(top_lines, _lexer, _formatter))
+    if len(lines) > 25:
+        tw.write(f'\n[...{str(path)} continues]\n', yellow=True)
 
 
 class _ExamplesManager:
@@ -139,7 +163,7 @@ class _ExamplesManager:
             if is_more_than_one_day_old:
                 click.echo('Examples copy is more than 1 day old...')
 
-            if is_different_branch:
+            if is_different_branch and self._explicit_branch:
                 click.echo('Different branch requested...')
 
             return is_more_than_one_day_old or (is_different_branch
@@ -160,6 +184,8 @@ class _ExamplesManager:
                   encoding='utf-8-sig') as f:
             rows = list(csv.DictReader(f))
 
+        categories = json.loads((self.examples / '_category.json').read_text())
+
         by_category = defaultdict(lambda: [])
 
         for row in rows:
@@ -169,18 +195,28 @@ class _ExamplesManager:
 
         tw = TerminalWriter()
 
-        print(f'Branch: {self.branch}')
+        click.echo(f'Branch: {self.branch}')
         tw.sep('=', 'Ploomber examples', blue=True)
+        click.echo()
 
-        for category in set(by_category):
-            tw.sep(' ', category.capitalize(), green=True)
-            print(Table.from_dicts(by_category[category]).to_format('simple'))
+        for category in sorted(by_category):
+            title = category.capitalize()
+            description = categories.get(category)
+
+            if description:
+                title = f'{title} ({description})'
+
+            tw.sep(' ', title, green=True)
+            click.echo()
+            click.echo(
+                Table.from_dicts(by_category[category]).to_format('simple'))
+            click.echo()
 
         tw.sep('=', blue=True)
 
-        tw.write('\nTo run these examples in a hosted '
+        tw.write('\nTo run these examples in free, hosted '
                  f'environment, see instructions at: {_URL}')
-        tw.write('\nTo get the source code: ploomber examples -n {name}\n\n')
+        tw.write('\nTo download: ploomber examples -n {name}\n')
 
 
 def main(name, force=False, branch=None, output=None):
@@ -192,11 +228,9 @@ def main(name, force=False, branch=None, output=None):
 
     if not manager.examples.exists() or manager.outdated() or force:
         if not manager.examples.exists():
-            print('Local copy does not exist...')
-        elif manager.outdated():
-            print('Outdated local copy...')
+            click.echo('Local copy does not exist...')
         elif force:
-            print('Forcing download..')
+            click.echo('Forcing download...')
 
         manager.clone()
 
@@ -212,7 +246,7 @@ def main(name, force=False, branch=None, output=None):
         else:
             output = output or name
 
-            click.echo(f'Copying example to {output}/')
+            tw.sep('=', f'Copying example {name!r} to {output}/', green=True)
 
             if Path(output).exists():
                 raise click.ClickException(
@@ -223,18 +257,15 @@ def main(name, force=False, branch=None, output=None):
             shutil.copytree(selected, output)
 
             path_to_readme = Path(output, 'README.md')
-            path_to_req = Path(output, 'requirements.txt')
-            path_to_env = Path(output, 'environment.yml')
             out_dir = output + ('\\'
                                 if platform.system() == 'Windows' else '/')
 
             tw.sep('=', str(path_to_readme), blue=True)
-            _display_markdown(path_to_readme)
+            _display_markdown(tw, path_to_readme)
             tw.sep('=', blue=True)
-            tw.write(
-                f'Done.\n\nTo install dependencies, use any of the following: '
-                f'\n  1. Move to {out_dir} and run "ploomber install"'
-                f'\n  2. conda env create -f {path_to_env}'
-                f'\n  3. pip install -r {path_to_req}'
-                f'\n\nCheck out {path_to_readme} for more details.\n',
-                green=True)
+            tw.sep('=', 'Installation', blue=True)
+            tw.write(f'Move to {out_dir} and run one of:'
+                     f'\n* ploomber install'
+                     f'\n* conda env create -f environment.yml'
+                     f'\n* pip install -r requirements.txt\n')
+            tw.sep('=', blue=True)

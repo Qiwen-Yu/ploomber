@@ -82,6 +82,19 @@ def test_error_if_exception_during_execution(monkeypatch):
         excinfo.value)
 
 
+def test_click_exception_isnt_shadowed_by_runtime_error(monkeypatch):
+    monkeypatch.setattr(
+        cli.cli_module.examples, 'main',
+        Mock(side_effect=ClickException('some click exception')))
+
+    runner = CliRunner()
+
+    result = runner.invoke(cli.cli, ['examples'])
+
+    assert result.exit_code == 1
+    assert result.output == 'Error: some click exception\n'
+
+
 def test_clones_in_home_directory(monkeypatch, tmp_directory):
     # patch home directory
     monkeypatch.setattr(examples, '_home', str(tmp_directory))
@@ -311,3 +324,27 @@ def test_error_if_git_clone_fails(monkeypatch):
         'An error occurred when downloading '
         'examples. Verify git is installed and your internet connection. '
         "(Error message: 'message')")
+
+
+@pytest.mark.parametrize('md, expected', [
+    ['', None],
+    ['<!-- start header -->\n', None],
+    ['\n\n<!-- end header -->\n\n', 2],
+    ["""
+<!-- start header -->
+
+<!-- end header -->
+""", 3],
+])
+def test_find_header(md, expected):
+    assert examples._find_header(md) == expected
+
+
+@pytest.mark.parametrize('md, clean', [
+    ['', ''],
+    ['there is no header', 'there is no header'],
+    ['stuff\n<!-- end header -->\nthings', 'things'],
+    ['more\nstuff\n<!-- end header -->\n\nthings', '\nthings'],
+])
+def test_skip_header(md, clean):
+    assert examples._skip_header(md) == clean
