@@ -53,32 +53,6 @@ def _display_markdown(source):
     click.echo(highlight(top_lines, _lexer, _formatter))
 
 
-def _list_examples(path):
-    with open(path / 'index.csv', newline='', encoding='utf-8-sig') as f:
-        rows = list(csv.DictReader(f))
-
-    by_type = defaultdict(lambda: [])
-
-    for row in rows:
-        type_ = row.pop('type')
-        del row['entry']
-        by_type[type_].append(row)
-
-    tw = TerminalWriter()
-
-    tw.sep('=', 'Ploomber examples', blue=True)
-
-    for type_ in ['basic', 'intermediate', 'advanced']:
-        tw.sep(' ', type_.capitalize(), green=True)
-        print(Table.from_dicts(by_type[type_]).to_format('simple'))
-
-    tw.sep('=', blue=True)
-
-    tw.write('\nTo run these examples in a hosted '
-             f'environment, see instructions at: {_URL}')
-    tw.write('\nTo get the source code: ploomber examples -n {name}\n\n')
-
-
 class _ExamplesManager:
     """Class for managing examples data
     """
@@ -87,6 +61,7 @@ class _ExamplesManager:
         self._path_to_metadata = self._home / '.metadata'
         self._examples = self._home / 'projects'
         self._branch = branch or _DEFAULT_BRANCH
+        self._explicit_branch = branch is not None
 
     @property
     def home(self):
@@ -167,7 +142,8 @@ class _ExamplesManager:
             if is_different_branch:
                 click.echo('Different branch requested...')
 
-            return is_more_than_one_day_old or is_different_branch
+            return is_more_than_one_day_old or (is_different_branch
+                                                and self._explicit_branch)
         else:
             click.echo('Cloning...')
             return True
@@ -178,16 +154,54 @@ class _ExamplesManager:
     def path_to_readme(self):
         return self.examples / 'README.md'
 
+    def list(self):
+        with open(self.examples / '_index.csv',
+                  newline='',
+                  encoding='utf-8-sig') as f:
+            rows = list(csv.DictReader(f))
+
+        by_category = defaultdict(lambda: [])
+
+        for row in rows:
+            category = row.pop('category')
+            del row['idx']
+            by_category[category].append(row)
+
+        tw = TerminalWriter()
+
+        print(f'Branch: {self.branch}')
+        tw.sep('=', 'Ploomber examples', blue=True)
+
+        for category in set(by_category):
+            tw.sep(' ', category.capitalize(), green=True)
+            print(Table.from_dicts(by_category[category]).to_format('simple'))
+
+        tw.sep('=', blue=True)
+
+        tw.write('\nTo run these examples in a hosted '
+                 f'environment, see instructions at: {_URL}')
+        tw.write('\nTo get the source code: ploomber examples -n {name}\n\n')
+
 
 def main(name, force=False, branch=None, output=None):
+    """
+    Entry point for examples
+    """
     manager = _ExamplesManager(home=_home, branch=branch)
     tw = TerminalWriter()
 
     if not manager.examples.exists() or manager.outdated() or force:
+        if not manager.examples.exists():
+            print('Local copy does not exist...')
+        elif manager.outdated():
+            print('Outdated local copy...')
+        elif force:
+            print('Forcing download..')
+
         manager.clone()
 
     if not name:
-        _list_examples(manager.examples)
+        manager.list()
     else:
         selected = manager.path_to(name)
 
